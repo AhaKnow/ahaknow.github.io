@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="AhaKnow as an interactive full-screen 3D particle wordmark in a quiet animated starfield."
+    />
+    <title>AhaKnow</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --black: #000000;
+        --ink: #05070b;
+        --star: rgba(240, 248, 255, 0.92);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: var(--black);
+      }
+
+      body {
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+        letter-spacing: 0;
+      }
+
+      #scene {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        display: block;
+        background:
+          radial-gradient(circle at 50% 46%, rgba(9, 13, 20, 0.92), transparent 48%),
+          linear-gradient(180deg, #000000 0%, #02040a 50%, #000000 100%);
+        cursor: crosshair;
+        touch-action: none;
+      }
+
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #scene {
+          cursor: default;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="scene" aria-hidden="true"></canvas>
+    <h1 class="sr-only">AhaKnow</h1>
+
+    <script>
+      (() => {
+        "use strict";
+
+        const canvas = document.getElementById("scene");
+        const ctx = canvas.getContext("2d", { alpha: false });
+        const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        const textValue = "AhaKnow";
+
+        const pointer = {
+          x: 0,
+          y: 0,
+          active: false,
+          pressed: false,
+        };
+
+        const state = {
+          width: 1,
+          height: 1,
+          dpr: 1,
+          particles: [],
+          stars: [],
+          textBounds: { width: 1, height: 1 },
+          scale: 1,
+          scaleTarget: 1,
+          maxScale: 1.2,
+          nextScaleAt: 0,
+          hue: Math.random() * 360,
+          hueTarget: Math.random() * 360,
+          nextHueAt: 0,
+          rotationX: 0,
+          rotationY: 0,
+        };
+
+        const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+        const random = (min, max) => min + Math.random() * (max - min);
+        const lerp = (from, to, amount) => from + (to - from) * amount;
+
+        function resize() {
+          state.dpr = Math.min(window.devicePixelRatio || 1, 2);
+          state.width = Math.max(1, window.innerWidth);
+          state.height = Math.max(1, window.innerHeight);
+          canvas.width = Math.floor(state.width * state.dpr);
+          canvas.height = Math.floor(state.height * state.dpr);
+          canvas.style.width = `${state.width}px`;
+          canvas.style.height = `${state.height}px`;
+          ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+          buildStars();
+          buildTextParticles();
+        }
+
+        function buildStars() {
+          const count = clamp(Math.floor((state.width * state.height) / 1500), 180, 920);
+          state.stars = Array.from({ length: count }, () => createStar(true));
+        }
+
+        function createStar(randomDepth) {
+          const depth = randomDepth ? random(0.22, 1.45) : 1.45;
+          return {
+            x: random(-state.width, state.width) * depth,
+            y: random(-state.height, state.height) * depth,
+            z: depth,
+            speed: random(0.0014, 0.006),
+            radius: random(0.45, 1.65),
+            phase: random(0, Math.PI * 2),
+            drift: random(-0.012, 0.012),
+          };
+        }
+
+        function buildTextParticles() {
+          const sample = document.createElement("canvas");
+          const sampleCtx = sample.getContext("2d", { willReadFrequently: true });
+          let fontSize = Math.min(state.height * 0.52, state.width * 0.3);
+
+          sampleCtx.font = `900 ${fontSize}px Inter, Arial, sans-serif`;
+          let metrics = sampleCtx.measureText(textValue);
+          const targetWidth = state.width * 0.82;
+          if (metrics.width > targetWidth) {
+            fontSize *= targetWidth / metrics.width;
+            sampleCtx.font = `900 ${fontSize}px Inter, Arial, sans-serif`;
+            metrics = sampleCtx.measureText(textValue);
+          }
+
+          const padding = Math.max(32, fontSize * 0.28);
+          sample.width = Math.ceil(metrics.width + padding * 2);
+          sample.height = Math.ceil(fontSize * 1.24 + padding * 2);
+          sampleCtx.clearRect(0, 0, sample.width, sample.height);
+          sampleCtx.font = `900 ${fontSize}px Inter, Arial, sans-serif`;
+          sampleCtx.textAlign = "center";
+          sampleCtx.textBaseline = "middle";
+          sampleCtx.fillStyle = "#ffffff";
+          sampleCtx.fillText(textValue, sample.width / 2, sample.height / 2 + fontSize * 0.025);
+
+          const image = sampleCtx.getImageData(0, 0, sample.width, sample.height).data;
+          const targetCount = state.width < 700 ? 4600 : 9800;
+          const step = state.width < 700 ? 4 : 5;
+          const scale = Math.min((state.width * 0.82) / sample.width, (state.height * 0.58) / sample.height);
+          const particles = [];
+
+          for (let y = 0; y < sample.height; y += step) {
+            for (let x = 0; x < sample.width; x += step) {
+              if (particles.length >= targetCount) {
+                break;
+              }
+
+              const alpha = image[(y * sample.width + x) * 4 + 3];
+              if (alpha < 132) {
+                continue;
+              }
+
+              const nx = x / sample.width - 0.5;
+              const ny = y / sample.height - 0.5;
+              const targetX = (x - sample.width / 2) * scale;
+              const targetY = (sample.height / 2 - y) * scale;
+              const targetZ =
+                Math.sin(nx * Math.PI * 2.2) * 52 +
+                Math.cos(ny * Math.PI * 3.4) * 34 +
+                random(-24, 24);
+
+              particles.push({
+                x: targetX + random(-state.width * 0.42, state.width * 0.42),
+                y: targetY + random(-state.height * 0.42, state.height * 0.42),
+                z: targetZ + random(-420, 420),
+                tx: targetX,
+                ty: targetY,
+                tz: targetZ,
+                vx: 0,
+                vy: 0,
+                vz: 0,
+                size: random(1.0, 2.55),
+                hueOffset: random(-92, 92) + nx * 120,
+                phase: random(0, Math.PI * 2),
+              });
+            }
+          }
+
+          state.particles = particles;
+          state.textBounds = {
+            width: sample.width * scale,
+            height: sample.height * scale,
+          };
+          state.maxScale = Math.min(
+            1.44,
+            Math.max(
+              1,
+              Math.min((state.width * 0.98) / state.textBounds.width, (state.height * 0.82) / state.textBounds.height),
+            ),
+          );
+          state.scale = Math.min(state.scale, state.maxScale);
+          state.scaleTarget = Math.min(state.scaleTarget, state.maxScale);
+        }
+
+        function bindEvents() {
+          window.addEventListener("resize", debounce(resize, 160));
+          window.addEventListener("pointermove", updatePointer, { passive: true });
+          window.addEventListener("pointerdown", (event) => {
+            pointer.pressed = true;
+            updatePointer(event);
+            state.scaleTarget = state.maxScale;
+            scatter(2.85);
+          });
+          window.addEventListener("pointerup", () => {
+            pointer.pressed = false;
+          });
+          window.addEventListener("pointercancel", () => {
+            pointer.pressed = false;
+            pointer.active = false;
+          });
+          window.addEventListener("pointerleave", () => {
+            pointer.pressed = false;
+            pointer.active = false;
+          });
+        }
+
+        function updatePointer(event) {
+          pointer.x = event.clientX;
+          pointer.y = event.clientY;
+          pointer.active = true;
+          scatter(pointer.pressed ? 1.4 : 0.48);
+        }
+
+        function scatter(force) {
+          const centerX = state.width / 2;
+          const centerY = state.height / 2;
+          const worldX = (pointer.x - centerX) / Math.max(0.001, state.scale);
+          const worldY = (centerY - pointer.y) / Math.max(0.001, state.scale);
+          const radius = (pointer.pressed ? 220 : 150) / Math.max(0.86, state.scale);
+          const radiusSq = radius * radius;
+
+          for (const particle of state.particles) {
+            const dx = particle.x - worldX;
+            const dy = particle.y - worldY;
+            const distanceSq = dx * dx + dy * dy;
+            if (distanceSq > radiusSq) {
+              continue;
+            }
+
+            const distance = Math.sqrt(distanceSq) || 1;
+            const amount = (1 - distance / radius) * force;
+            const angle = Math.atan2(dy, dx);
+            particle.vx += Math.cos(angle) * amount * 22;
+            particle.vy += Math.sin(angle) * amount * 22;
+            particle.vz += random(-18, 70) * amount;
+          }
+        }
+
+        function updateTargets(now) {
+          if (now >= state.nextHueAt) {
+            state.hueTarget += random(-190, 190);
+            state.nextHueAt = now + random(1200, 3200);
+          }
+
+          if (now >= state.nextScaleAt && !pointer.pressed) {
+            state.scaleTarget = random(0.78, state.maxScale);
+            state.nextScaleAt = now + random(1800, 4200);
+          }
+
+          state.hue = lerp(state.hue, state.hueTarget, 0.012);
+          state.scale = lerp(state.scale, pointer.pressed ? state.maxScale : state.scaleTarget, 0.018);
+        }
+
+        function drawStars(delta, now) {
+          ctx.fillStyle = "#000000";
+          ctx.fillRect(0, 0, state.width, state.height);
+
+          const centerX = state.width / 2;
+          const centerY = state.height / 2;
+          ctx.save();
+          ctx.globalCompositeOperation = "screen";
+
+          for (let index = 0; index < state.stars.length; index += 1) {
+            const star = state.stars[index];
+            if (!prefersReducedMotion) {
+              star.z -= star.speed * delta;
+              star.x += star.drift * delta * state.width * 0.012;
+            }
+
+            if (star.z <= 0.18) {
+              state.stars[index] = createStar(false);
+              continue;
+            }
+
+            const perspective = 1 / star.z;
+            const x = centerX + star.x * perspective;
+            const y = centerY + star.y * perspective;
+            if (x < -80 || x > state.width + 80 || y < -80 || y > state.height + 80) {
+              state.stars[index] = createStar(false);
+              continue;
+            }
+
+            const depthAlpha = clamp((1.48 - star.z) / 1.28, 0.12, 0.88);
+            const pulse = 0.55 + Math.sin(now * 0.0014 + star.phase) * 0.32;
+            const alpha = clamp(depthAlpha * pulse, 0.08, 0.82);
+            const radius = clamp(star.radius * perspective, 0.32, 2.4);
+            ctx.fillStyle = `rgba(230, 240, 255, ${alpha})`;
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          ctx.restore();
+        }
+
+        function drawParticles(delta, now) {
+          const centerX = state.width / 2;
+          const centerY = state.height / 2;
+          const camera = Math.max(760, state.width * 0.9);
+          const autoMotion = prefersReducedMotion ? 0 : 1;
+          const rotY = Math.sin(now * 0.00022) * 0.22 * autoMotion;
+          const rotX = Math.cos(now * 0.00018) * 0.105 * autoMotion;
+          const sinY = Math.sin(rotY);
+          const cosY = Math.cos(rotY);
+          const sinX = Math.sin(rotX);
+          const cosX = Math.cos(rotX);
+
+          ctx.save();
+          ctx.globalCompositeOperation = "lighter";
+
+          for (const particle of state.particles) {
+            const driftX = Math.sin(now * 0.001 + particle.phase) * 7 * autoMotion;
+            const driftY = Math.cos(now * 0.0009 + particle.phase) * 5 * autoMotion;
+            const driftZ = Math.sin(now * 0.0012 + particle.phase) * 18 * autoMotion;
+            const heal = pointer.pressed ? 0.028 : 0.066;
+
+            particle.vx += (particle.tx + driftX - particle.x) * heal * delta;
+            particle.vy += (particle.ty + driftY - particle.y) * heal * delta;
+            particle.vz += (particle.tz + driftZ - particle.z) * heal * delta;
+            particle.vx *= 0.86;
+            particle.vy *= 0.86;
+            particle.vz *= 0.85;
+            particle.x += particle.vx * delta;
+            particle.y += particle.vy * delta;
+            particle.z += particle.vz * delta;
+
+            const scaledX = particle.x * state.scale;
+            const scaledY = particle.y * state.scale;
+            const scaledZ = particle.z * state.scale;
+            const rotateX = scaledX * cosY - scaledZ * sinY;
+            const zAfterY = scaledX * sinY + scaledZ * cosY;
+            const rotateY = scaledY * cosX - zAfterY * sinX;
+            const rotateZ = scaledY * sinX + zAfterY * cosX;
+            const perspective = camera / (camera + rotateZ);
+            const screenX = centerX + rotateX * perspective;
+            const screenY = centerY - rotateY * perspective;
+
+            if (screenX < -40 || screenX > state.width + 40 || screenY < -40 || screenY > state.height + 40) {
+              continue;
+            }
+
+            const hue = ((state.hue + particle.hueOffset + Math.sin(now * 0.0013 + particle.phase) * 70) % 360 + 360) % 360;
+            const lightness = 58 + Math.sin(now * 0.0011 + particle.phase) * 16;
+            const alpha = clamp(0.34 + perspective * 0.54, 0.24, 0.96);
+            const radius = clamp(particle.size * perspective * state.scale, 0.72, 4.3);
+            ctx.fillStyle = `hsla(${hue}, 92%, ${lightness}%, ${alpha})`;
+            ctx.beginPath();
+            ctx.arc(screenX, screenY, radius, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          ctx.restore();
+        }
+
+        let lastTime = performance.now();
+
+        function animate(now) {
+          const delta = Math.min((now - lastTime) / 16.67, 2.4);
+          lastTime = now;
+          updateTargets(now);
+          drawStars(delta, now);
+          drawParticles(delta, now);
+          requestAnimationFrame(animate);
+        }
+
+        function debounce(callback, wait) {
+          let timer = 0;
+          return () => {
+            window.clearTimeout(timer);
+            timer = window.setTimeout(callback, wait);
+          };
+        }
+
+        resize();
+        bindEvents();
+        requestAnimationFrame(animate);
+      })();
+    </script>
+  </body>
+</html>
